@@ -18,12 +18,22 @@ def _colour(tid: int) -> tuple[int, int, int]:
     return int(c[0]), int(c[1]), int(c[2])
 
 
-def render_frames(run: Run, width: int = 640, trail: int = 12) -> list[np.ndarray]:
+def render_frames(
+    run: Run, width: int = 640, trail: int = 12, background: str = "dark"
+) -> list[np.ndarray]:
+    """Render one image per frame. ``background='dark'`` draws on an empty canvas so that no
+    VisDrone pixels are redistributed; ``'video'`` overlays on the source frame (local use)."""
     frames = []
     history: dict[int, list[tuple[int, np.ndarray]]] = {}  # id -> [(frame idx, foot in ref coords)]
     for i, (p, tracks) in enumerate(zip(run.seq.frame_paths, run.tracks, strict=True)):
-        img = cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB)
-        h, w = img.shape[:2]
+        if background == "video":
+            img = cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB)
+            h, w = img.shape[:2]
+        else:
+            h, w = run.frame_shape
+            img = np.full((h, w, 3), 18, np.uint8)
+            img[::96, :] = 34
+            img[:, ::96] = 34
         A = np.vstack([run.to_ref[i], [0, 0, 1]])
         Ainv = np.linalg.inv(A)
         boxes = np.array([t[1] for t in tracks]).reshape(-1, 4)

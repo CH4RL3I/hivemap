@@ -132,5 +132,12 @@ class PersonDetector:
         return boxes.reshape(-1, 4).astype(np.float32), scores.astype(np.float32)
 
 
-def load_rgb(path: Path) -> np.ndarray:
-    return np.asarray(Image.open(path).convert("RGB"))
+def load_rgb(path: Path, max_width: int | None = None) -> tuple[np.ndarray, float]:
+    """Load an RGB frame, optionally shrunk to ``max_width``. Returns (image, scale) where
+    ``scale`` is resized width over original width (1.0 if not resized)."""
+    im = Image.open(path).convert("RGB")
+    scale = 1.0
+    if max_width and im.width > max_width:
+        scale = max_width / im.width
+        im = im.resize((max_width, round(im.height * scale)), Image.BILINEAR)
+    return np.asarray(im), scale

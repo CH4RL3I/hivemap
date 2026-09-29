@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from .analytics import GroundResult, analyse, ground_positions
 from .camera import IDENTITY, compose, estimate_motion
@@ -19,6 +20,7 @@ from .tracker import ByteTracker
 
 DATA_ROOT = Path("data/visdrone")
 CACHE_ROOT = Path("data/cache")
+WORK_WIDTH = 1344  # frames wider than this are shrunk before detection; boxes are mapped back
 SOURCE_FPS = 30.0  # VisDrone videos are recorded at about 30 fps (assumption, not in the metadata)
 
 
@@ -44,6 +46,7 @@ class Run:
     tracks: list[list[tuple[int, np.ndarray, float]]] = field(default_factory=list)
     track_ms: float = 0.0
     to_ref: list[np.ndarray] = field(default_factory=list)
+    frame_shape: tuple[int, int] = (756, 1344)
 
 
 def _cache_path(seq: Sequence, cfg: Config) -> Path:
@@ -75,18 +78,21 @@ def compute_detections(seq: Sequence, cfg: Config, verbose: bool = True) -> Run:
         full, tiled, full_ms, tile_ms, steps, cmc_ms = [], [], [], [], [], []
         prev = None
         for i, p in enumerate(seq.frame_paths):
-            rgb = load_rgb(p)
+            rgb, sc = load_rgb(p, WORK_WIDTH)
             t0 = time.perf_counter()
             f = det.detect_full(rgb)
             t1 = time.perf_counter()
             t = det.detect_tiled(rgb, f)
             t2 = time.perf_counter()
+            f, t = (f[0] / sc, f[1]), (t[0] / sc, t[1])
             full.append(f)
             tiled.append(t)
             full_ms.append((t1 - t0) * 1000)
             tile_ms.append((t2 - t1) * 1000)
             t0 = time.perf_counter()
-            steps.append(IDENTITY.copy() if prev is None else estimate_motion(prev, rgb))
+            step = IDENTITY.copy() if prev is None else estimate_motion(prev, rgb)
+            step[:, 2] /= sc  # translation back to original-resolution pixels
+            steps.append(step)
             cmc_ms.append((time.perf_counter() - t0) * 1000)
             prev = rgb
             if verbose and i % 10 == 0:
@@ -116,7 +122,8 @@ def compute_detections(seq: Sequence, cfg: Config, verbose: bool = True) -> Run:
         )
     z = np.load(cp, allow_pickle=True)
     dets, det_ms = _variant(z, cfg)
-    return Run(seq, cfg, dets, det_ms, list(z["steps"]), z["cmc_ms"])
+    w, h = Image.open(seq.frame_paths[0]).size
+    return Run(seq, cfg, dets, det_ms, list(z["steps"]), z["cmc_ms"], frame_shape=(h, w))
 
 
 def track(run: Run, **tracker_kwargs) -> Run:
@@ -152,7 +159,7 @@ def _gt_frames(run: Run) -> list[tuple[np.ndarray, np.ndarray]]:
     return out
 
 
-def evaluate(run: Run, frame_shape: tuple[int, int] = (756, 1344)) -> dict:
+def evaluate(run: Run) -> dict:
     """Detection AP, tracking metrics, count error and per-frame runtime for a tracked run."""
     gt = _gt_frames(run)
     ign = [run.seq.ignore.get(int(p.stem), np.zeros((0, 4))) for p in run.seq.frame_paths]
@@ -173,12 +180,17 @@ def evaluate(run: Run, frame_shape: tuple[int, int] = (756, 1344)) -> dict:
             hyp.append((np.zeros(0, int), np.zeros((0, 4))))
     mot = evaluate_mot(gt, hyp)
 
+    frame_shape = run.frame_shape
     t0 = time.perf_counter()
     pred_counts, dens_counts = [], []
     for b, s in dets:
         kept = b[s >= run.cfg.det_thr]
         pred_counts.append(len(kept))
-        dens_counts.append(density_map(head_points(kept), frame_shape, sigma=15, scale=4).sum())
+        dens_counts.append(
+            density_map(
+                head_points(kept), frame_shape, sigma=15 * frame_shape[0] / 756, scale=4
+            ).sum()
+        )
     dens_ms = (time.perf_counter() - t0) * 1000 / max(len(dets), 1)
     true_counts = [len(g[0]) for g in gt]
     track_counts = [len(h[0]) for h in hyp]
@@ -205,13 +217,13 @@ def evaluate(run: Run, frame_shape: tuple[int, int] = (756, 1344)) -> dict:
     }
 
 
-def calibrate(run: Run, frame_shape: tuple[int, int] = (756, 1344)) -> tuple[Camera, dict]:
+def calibrate(run: Run) -> tuple[Camera, dict]:
     """Fit the ground-plane camera from confident detections (no ground truth is used)."""
     boxes = [b[s >= 0.7] for b, s in run.dets if len(b)]
     allb = np.concatenate([b for b in boxes if len(b)]) if boxes else np.zeros((0, 4))
     # Stationary or seated people and very small boxes bias the fit; keep plausible pedestrians.
     allb = allb[(allb[:, 3] - allb[:, 1]) > 12]
-    return fit_camera(allb, frame_shape[1], frame_shape[0])
+    return fit_camera(allb, run.frame_shape[1], run.frame_shape[0])
 
 
 def ground(run: Run, camera: Camera, **kw) -> GroundResult:

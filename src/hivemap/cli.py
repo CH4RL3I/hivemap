@@ -97,13 +97,14 @@ def render(
     frames: Frames = 70,
     det_thr: float = 0.5,
     width: int = 640,
+    background: Annotated[str, typer.Option(help="dark (default) or video")] = "dark",
 ) -> None:
     """Render an annotated GIF (tracks, trails, density overlay), under 5 MB."""
     from .pipeline import Config, load
     from .render import render_frames, write_gif
 
     r = load(sequence, Config(tiled=tiled, stride=stride, max_frames=frames, det_thr=det_thr))
-    path = write_gif(render_frames(r, width=width), out)
+    path = write_gif(render_frames(r, width=width, background=background), out)
     typer.echo(f"wrote {path} ({path.stat().st_size / 1e6:.2f} MB)")
 
 
@@ -124,7 +125,7 @@ def bench(
 
     seq = load_sequence(DATA_ROOT, sequence, stride=3, max_frames=n + 1)
     det = PersonDetector(backend, 640)
-    imgs = [load_rgb(p) for p in seq.frame_paths]
+    imgs = [load_rgb(p, 1344)[0] for p in seq.frame_paths]
     det.detect_full(imgs[0])
     tf, tt = [], []
     for im in imgs[1:]:
