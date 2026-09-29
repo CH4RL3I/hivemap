@@ -6,16 +6,20 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 
-def density_map(points: np.ndarray, shape: tuple[int, int], sigma: float = 15.0) -> np.ndarray:
+def density_map(
+    points: np.ndarray, shape: tuple[int, int], sigma: float = 15.0, scale: int = 1
+) -> np.ndarray:
     """Place a unit impulse per point and blur with a Gaussian.
 
     ``points`` is (N, 2) in (x, y) pixels, ``shape`` is (H, W). Reflective boundary handling
     conserves mass, so ``density_map(...).sum() == N`` up to floating point, even for points
-    near the border. Points outside the image are clipped to the nearest pixel.
+    near the border. Points outside the image are clipped to the nearest pixel. With
+    ``scale > 1`` the map is computed on a grid ``scale`` times coarser (same integral, faster).
     """
-    h, w = shape
+    h, w = shape[0] // scale, shape[1] // scale
+    sigma = sigma / scale
     imp = np.zeros((h, w), dtype=np.float64)
-    pts = np.asarray(points, dtype=float).reshape(-1, 2)
+    pts = np.asarray(points, dtype=float).reshape(-1, 2) / scale
     if len(pts):
         xs = np.clip(np.rint(pts[:, 0]).astype(int), 0, w - 1)
         ys = np.clip(np.rint(pts[:, 1]).astype(int), 0, h - 1)
