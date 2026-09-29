@@ -30,23 +30,39 @@ def test_associate_prefers_global_optimum_over_greedy():
     assert np.isclose(total, 0.45)  # 0.20 + 0.25 beats 0.30 + 0.90
 
 
+def test_update_pairs_each_track_with_its_nearest_detection():
+    tr = ByteTracker(high_thr=0.5, new_thr=0.5, min_hits=1)
+    first = {
+        tid: b for tid, b, _ in tr.update(np.array([box(0, 0), box(100, 0)]), np.array([0.9, 0.9]))
+    }
+    left = min(first, key=lambda t: first[t][0])
+    # Detections arrive in the opposite order and each moved by 2 px.
+    out = {
+        tid: b for tid, b, _ in tr.update(np.array([box(102, 0), box(2, 0)]), np.array([0.9, 0.9]))
+    }
+    assert len(out) == 2
+    centre = lambda b: (b[0] + b[2]) / 2  # noqa: E731
+    assert abs(centre(out[left]) - 2) < 5
+
+
 def test_crossing_tracks_keep_identities():
-    """Two people walk through each other along a line; IDs must not swap."""
+    """Two people of different size walk through each other; each ID must follow its person."""
     tr = ByteTracker(high_thr=0.5, new_thr=0.5, min_hits=1, max_age=5)
-    ids_a, ids_b = [], []
+    path: dict[int, list[float]] = {}
     for t in range(41):
         xa, xb = 100 + 5 * t, 300 - 5 * t  # they meet at t = 20
-        ya, yb = 200, 200 + (0 if t < 20 else 0)
-        # Different sizes so the crossing is resolvable by IoU/motion.
-        dets = np.array([box(xa, ya, 20, 40), box(xb, yb + 3, 30, 60)])
+        dets = np.array([box(xa, 200, 20, 40), box(xb, 203, 30, 60)])
         out = tr.update(dets, np.array([0.9, 0.9]))
-        by_size = {round(b[3] - b[1]): tid for tid, b, _ in out}
-        if 40 in by_size:
-            ids_a.append(by_size[40])
-        if 60 in by_size:
-            ids_b.append(by_size[60])
-    assert len(set(ids_a)) == 1 and len(set(ids_b)) == 1
-    assert ids_a[0] != ids_b[0]
+        assert len(out) == 2
+        for tid, b, _ in out:
+            path.setdefault(tid, []).append((b[0] + b[2]) / 2)
+    assert len(path) == 2  # no identity was created or lost
+    for xs in path.values():
+        assert len(xs) == 41
+        steps = np.abs(np.diff(xs))
+        assert steps.max() < 12  # a swap at the crossing would jump by tens of pixels
+    slopes = sorted(np.polyfit(range(41), xs, 1)[0] for xs in path.values())
+    assert slopes[0] < -4 and slopes[1] > 4  # one ID moves right, the other moves left
 
 
 def test_track_survives_missing_frames_then_recovers_same_id():
