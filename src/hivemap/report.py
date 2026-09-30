@@ -64,7 +64,7 @@ def recall_by_height(runs: list[Run]) -> dict[str, tuple[int, int]]:
             iou = iou_matrix(g, b)
             found = np.zeros(len(g), bool)
             if iou.size:
-                r, c = linear_sum_assignment(-(iou >= 0.5) * iou)
+                r, c = linear_sum_assignment(-((iou >= 0.5) * iou))
                 found[r[iou[r, c] >= 0.5]] = True
             h = g[:, 3] - g[:, 1]
             for k, (lo, hi) in enumerate(HEIGHT_BINS):
