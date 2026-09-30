@@ -16,7 +16,6 @@ dependencies = [
   "torchvision>=0.17",
   "transformers>=4.40",
   "typer>=0.12",
-  "gdown>=5",
 ]
 
 [project.scripts]
