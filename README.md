@@ -71,7 +71,7 @@ flowchart LR
 
 ```
 uv sync
-uv run hivemap fetch                        # about 150 MB, four validation sequences
+uv run hivemap fetch                        # about 400 MB, four validation sequences
 uv run hivemap run uav0000086_00000_v       # tracks, metrics, ground figure in runs/
 uv run hivemap eval                         # writes docs/results.md and figures
 uv run hivemap render uav0000086_00000_v    # docs/hero.gif
